@@ -22,7 +22,7 @@ spec:
       kind: Application
       jsonPointers:
         - /status
-        - /metadata/annotations/argocd.argoproj.io~1tracking-id
+        - /metadata/annotations
   syncPolicy:
     automated:
       prune: true
