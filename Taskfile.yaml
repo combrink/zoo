@@ -104,25 +104,33 @@ tasks:
     desc: Deploy Tailscale SealedSecret + operator on the management cluster
     cmds:
       - kubectl --context {{.MGMT_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.MGMT_CLUSTER}} apply -f -
-      - kubectl --context {{.MGMT_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/mgmt
-      - helm upgrade --install tailscale-operator
-          tailscale/tailscale-operator
-          --version 1.94.2
-          --namespace tailscale --create-namespace
-          --values bootstrap/tailscale-operator/mgmt/values-mgmt.yaml
-          --kube-context {{.MGMT_CLUSTER}}
+      - kubectl --context {{.MGMT_CLUSTER}} apply --server-side --force-conflicts -k bootstrap/tailscale-operator/mgmt
+      - |
+        if ! helm status tailscale-operator --kube-context {{.MGMT_CLUSTER}} -n tailscale &>/dev/null; then
+          helm install tailscale-operator tailscale/tailscale-operator \
+            --version 1.94.2 \
+            --namespace tailscale --create-namespace \
+            --values bootstrap/tailscale-operator/mgmt/values-mgmt.yaml \
+            --kube-context {{.MGMT_CLUSTER}}
+        else
+          echo "tailscale-operator already installed on mgmt (managed by ArgoCD) — skipping helm install"
+        fi
 
   bootstrap:tailscale:homelab:
     desc: Deploy Tailscale SealedSecret + operator on the homelab cluster
     cmds:
       - kubectl --context {{.HOMELAB_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
-      - kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/homelab
-      - helm upgrade --install tailscale-operator
-          tailscale/tailscale-operator
-          --version 1.94.2
-          --namespace tailscale --create-namespace
-          --values bootstrap/tailscale-operator/homelab/values-homelab.yaml
-          --kube-context {{.HOMELAB_CLUSTER}}
+      - kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side --force-conflicts -k bootstrap/tailscale-operator/homelab
+      - |
+        if ! helm status tailscale-operator --kube-context {{.HOMELAB_CLUSTER}} -n tailscale &>/dev/null; then
+          helm install tailscale-operator tailscale/tailscale-operator \
+            --version 1.94.2 \
+            --namespace tailscale --create-namespace \
+            --values bootstrap/tailscale-operator/homelab/values-homelab.yaml \
+            --kube-context {{.HOMELAB_CLUSTER}}
+        else
+          echo "tailscale-operator already installed on homelab (managed by ArgoCD) — skipping helm install"
+        fi
 
   bootstrap:tailscale:
     desc: Install Tailscale operator on both clusters
