@@ -74,7 +74,8 @@ tasks:
           --from-literal=client_id=$TAILSCALE_CLIENT_ID
           --from-literal=client_secret=$TAILSCALE_CLIENT_SECRET
           --dry-run=client -o yaml
-          | kubeseal --context {{.MGMT_CLUSTER}} --namespace tailscale -o yaml
+          | kubeseal --context {{.MGMT_CLUSTER}} --namespace tailscale
+          --controller-name sealed-secrets --controller-namespace kube-system -o yaml
           > bootstrap/tailscale-operator/mgmt/sealedsecret-mgmt.yaml
 
   secrets:seal:tailscale:homelab:
@@ -85,7 +86,8 @@ tasks:
           --from-literal=client_id=$TAILSCALE_CLIENT_ID
           --from-literal=client_secret=$TAILSCALE_CLIENT_SECRET
           --dry-run=client -o yaml
-          | kubeseal --context {{.HOMELAB_CLUSTER}} --namespace tailscale -o yaml
+          | kubeseal --context {{.HOMELAB_CLUSTER}} --namespace tailscale
+          --controller-name sealed-secrets --controller-namespace kube-system -o yaml
           > bootstrap/tailscale-operator/homelab/sealedsecret-homelab.yaml
 
   secrets:seal:tailscale:
@@ -101,9 +103,11 @@ tasks:
   bootstrap:tailscale:mgmt:
     desc: Deploy Tailscale SealedSecret + operator on the management cluster
     cmds:
+      - kubectl --context {{.MGMT_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.MGMT_CLUSTER}} apply -f -
       - kubectl --context {{.MGMT_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/mgmt
       - helm upgrade --install tailscale-operator
-          oci://ghcr.io/tailscale/helm-charts/tailscale-operator
+          tailscale/tailscale-operator
+          --version 1.94.2
           --namespace tailscale --create-namespace
           --values bootstrap/tailscale-operator/mgmt/values-mgmt.yaml
           --kube-context {{.MGMT_CLUSTER}}
@@ -111,9 +115,11 @@ tasks:
   bootstrap:tailscale:homelab:
     desc: Deploy Tailscale SealedSecret + operator on the homelab cluster
     cmds:
+      - kubectl --context {{.HOMELAB_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
       - kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/homelab
       - helm upgrade --install tailscale-operator
-          oci://ghcr.io/tailscale/helm-charts/tailscale-operator
+          tailscale/tailscale-operator
+          --version 1.94.2
           --namespace tailscale --create-namespace
           --values bootstrap/tailscale-operator/homelab/values-homelab.yaml
           --kube-context {{.HOMELAB_CLUSTER}}
@@ -129,6 +135,8 @@ tasks:
   bootstrap:argocd:
     desc: Install ArgoCD on the management cluster via kustomize+helm
     cmds:
+      # First pass installs CRDs + core resources; second pass picks up AppProjects now that CRDs are registered
+      - kustomize build --enable-helm bootstrap/argocd | kubectl --context {{.MGMT_CLUSTER}} apply --server-side -f - 2>&1 || true
       - kustomize build --enable-helm bootstrap/argocd | kubectl --context {{.MGMT_CLUSTER}} apply --server-side -f -
 
   bootstrap:argocd:wait:

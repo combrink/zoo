@@ -13,7 +13,7 @@ spec:
   sources:
     - repoURL: https://pkgs.tailscale.com/helmcharts
       chart: tailscale-operator
-      targetRevision: 1.82.0
+      targetRevision: 1.94.2
       helm:
         valuesFiles:
           - $values/bootstrap/tailscale-operator/homelab/values-homelab.yaml
