@@ -1,0 +1,6 @@
+# kustomize helm chart cache
+bootstrap/*/charts/
+bootstrap/*/*/charts/
+
+# local Claude settings
+.claude/settings.local.json

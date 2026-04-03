@@ -1,0 +1,25 @@
+---
+# Root app-of-apps for the homelab cluster.
+# Applied once manually — ArgoCD then self-manages gitops/homelab/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-homelab
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/combrink/zoo.git
+    targetRevision: HEAD
+    path: gitops/homelab
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

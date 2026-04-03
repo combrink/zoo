@@ -1,0 +1,31 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator-homelab
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://pkgs.tailscale.com/helmcharts
+      chart: tailscale-operator
+      targetRevision: 1.82.0
+      helm:
+        valuesFiles:
+          - $values/bootstrap/tailscale-operator/homelab/values-homelab.yaml
+    - repoURL: https://github.com/combrink/zoo.git
+      targetRevision: HEAD
+      ref: values
+  destination:
+    server: https://k3d-homelab-serverlb:6443
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

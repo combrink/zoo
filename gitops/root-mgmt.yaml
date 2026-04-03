@@ -1,0 +1,25 @@
+---
+# Root app-of-apps for the management cluster.
+# Applied once manually — ArgoCD then self-manages gitops/mgmt/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-mgmt
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/combrink/zoo.git
+    targetRevision: HEAD
+    path: gitops/mgmt
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,12 @@
+# OAuth credentials are read from a pre-created secret.
+# Before running: kubectl --context k3d-apps -n tailscale create secret generic operator-oauth \
+#   --from-literal=client_id=<TS_OAUTH_CLIENT_ID> \
+#   --from-literal=client_secret=<TS_OAUTH_CLIENT_SECRET>
+oauth:
+  clientId: ""
+  clientSecret: ""
+
+operatorConfig:
+  hostname: k3d-homelab
+  defaultTags:
+    - tag:kubernetes

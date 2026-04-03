@@ -1,0 +1,208 @@
+---
+version: "3"
+
+vars:
+  MGMT_CLUSTER: k3d-mgmt
+  HOMELAB_CLUSTER: k3d-homelab
+  ARGOCD_NAMESPACE: argocd
+
+tasks:
+  # ── Cluster lifecycle ──────────────────────────────────────────────────────
+
+  cluster:create:mgmt:
+    desc: Create the management k3d cluster
+    cmds:
+      - k3d cluster create --config clusters/00-k3d-mgmt.yaml
+
+  cluster:create:homelab:
+    desc: Create the homelab k3d cluster
+    cmds:
+      - k3d cluster create --config clusters/01-k3d-homelab.yaml
+
+  cluster:network:
+    desc: Create shared Docker network for both clusters
+    cmds:
+      - docker network create k3d-zoo 2>/dev/null || true
+
+  cluster:create:
+    desc: Create both clusters
+    cmds:
+      - task: cluster:network
+      - task: cluster:create:mgmt
+      - task: cluster:create:homelab
+
+  cluster:delete:mgmt:
+    desc: Delete the management k3d cluster
+    cmds:
+      - k3d cluster delete mgmt
+
+  cluster:delete:homelab:
+    desc: Delete the homelab k3d cluster
+    cmds:
+      - k3d cluster delete homelab
+
+  cluster:delete:
+    desc: Delete both clusters
+    deps: [cluster:delete:mgmt, cluster:delete:homelab]
+
+  # ── Sealed Secrets bootstrap ──────────────────────────────────────────────
+
+  bootstrap:sealed-secrets:mgmt:
+    desc: Install sealed-secrets controller on the management cluster
+    cmds:
+      - kustomize build --enable-helm bootstrap/sealed-secrets | kubectl --context {{.MGMT_CLUSTER}} apply --server-side -f -
+
+  bootstrap:sealed-secrets:homelab:
+    desc: Install sealed-secrets controller on the homelab cluster
+    cmds:
+      - kustomize build --enable-helm bootstrap/sealed-secrets | kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side -f -
+
+  bootstrap:sealed-secrets:
+    desc: Install sealed-secrets controller on both clusters
+    cmds:
+      - task: bootstrap:sealed-secrets:mgmt
+      - task: bootstrap:sealed-secrets:homelab
+
+  # ── Secret sealing helpers ─────────────────────────────────────────────────
+  # Prerequisites: TAILSCALE_CLIENT_ID and TAILSCALE_CLIENT_SECRET must be set.
+
+  secrets:seal:tailscale:mgmt:
+    desc: Seal Tailscale OAuth credentials for the mgmt cluster
+    cmds:
+      - kubectl create secret generic operator-oauth
+          --namespace tailscale
+          --from-literal=client_id=$TAILSCALE_CLIENT_ID
+          --from-literal=client_secret=$TAILSCALE_CLIENT_SECRET
+          --dry-run=client -o yaml
+          | kubeseal --context {{.MGMT_CLUSTER}} --namespace tailscale -o yaml
+          > bootstrap/tailscale-operator/mgmt/sealedsecret-mgmt.yaml
+
+  secrets:seal:tailscale:homelab:
+    desc: Seal Tailscale OAuth credentials for the homelab cluster
+    cmds:
+      - kubectl create secret generic operator-oauth
+          --namespace tailscale
+          --from-literal=client_id=$TAILSCALE_CLIENT_ID
+          --from-literal=client_secret=$TAILSCALE_CLIENT_SECRET
+          --dry-run=client -o yaml
+          | kubeseal --context {{.HOMELAB_CLUSTER}} --namespace tailscale -o yaml
+          > bootstrap/tailscale-operator/homelab/sealedsecret-homelab.yaml
+
+  secrets:seal:tailscale:
+    desc: Seal Tailscale OAuth credentials for both clusters
+    cmds:
+      - task: secrets:seal:tailscale:mgmt
+      - task: secrets:seal:tailscale:homelab
+
+  # ── Tailscale operator bootstrap ──────────────────────────────────────────
+  # Pre-requisite: sealed-secrets must be running and OAuth secrets sealed.
+  # Run: task bootstrap:sealed-secrets && task secrets:seal:tailscale
+
+  bootstrap:tailscale:mgmt:
+    desc: Deploy Tailscale SealedSecret + operator on the management cluster
+    cmds:
+      - kubectl --context {{.MGMT_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/mgmt
+      - helm upgrade --install tailscale-operator
+          oci://ghcr.io/tailscale/helm-charts/tailscale-operator
+          --namespace tailscale --create-namespace
+          --values bootstrap/tailscale-operator/mgmt/values-mgmt.yaml
+          --kube-context {{.MGMT_CLUSTER}}
+
+  bootstrap:tailscale:homelab:
+    desc: Deploy Tailscale SealedSecret + operator on the homelab cluster
+    cmds:
+      - kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side -k bootstrap/tailscale-operator/homelab
+      - helm upgrade --install tailscale-operator
+          oci://ghcr.io/tailscale/helm-charts/tailscale-operator
+          --namespace tailscale --create-namespace
+          --values bootstrap/tailscale-operator/homelab/values-homelab.yaml
+          --kube-context {{.HOMELAB_CLUSTER}}
+
+  bootstrap:tailscale:
+    desc: Install Tailscale operator on both clusters
+    cmds:
+      - task: bootstrap:tailscale:mgmt
+      - task: bootstrap:tailscale:homelab
+
+  # ── ArgoCD bootstrap ───────────────────────────────────────────────────────
+
+  bootstrap:argocd:
+    desc: Install ArgoCD on the management cluster via kustomize+helm
+    cmds:
+      - kustomize build --enable-helm bootstrap/argocd | kubectl --context {{.MGMT_CLUSTER}} apply --server-side -f -
+
+  bootstrap:argocd:wait:
+    desc: Wait for ArgoCD pods to become ready
+    cmds:
+      - kubectl --context {{.MGMT_CLUSTER}} -n {{.ARGOCD_NAMESPACE}} rollout status deploy/argocd-server
+      - kubectl --context {{.MGMT_CLUSTER}} -n {{.ARGOCD_NAMESPACE}} rollout status deploy/argocd-repo-server
+      - kubectl --context {{.MGMT_CLUSTER}} -n {{.ARGOCD_NAMESPACE}} rollout status deploy/argocd-applicationset-controller
+
+  bootstrap:argocd:password:
+    desc: Print the initial ArgoCD admin password
+    cmds:
+      - kubectl --context {{.MGMT_CLUSTER}} -n {{.ARGOCD_NAMESPACE}} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d && echo
+
+  # ── ArgoCD cluster registration ────────────────────────────────────────────
+
+  bootstrap:argocd:register-homelab:
+    desc: Register the homelab cluster with ArgoCD via a cluster secret
+    vars:
+      TOKEN:
+        sh: kubectl --context {{.HOMELAB_CLUSTER}} create token argocd-manager -n kube-system --duration=8760h 2>/dev/null || kubectl --context {{.HOMELAB_CLUSTER}} -n kube-system get secret argocd-manager-token -o jsonpath='{.data.token}' | base64 -d
+    cmds:
+      - kubectl --context {{.HOMELAB_CLUSTER}} create serviceaccount argocd-manager -n kube-system --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
+      - kubectl --context {{.HOMELAB_CLUSTER}} create clusterrolebinding argocd-manager-cluster-admin --clusterrole=cluster-admin --serviceaccount=kube-system:argocd-manager --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
+      - |
+        TOKEN=$(kubectl --context {{.HOMELAB_CLUSTER}} create token argocd-manager -n kube-system --duration=8760h)
+        kubectl --context {{.MGMT_CLUSTER}} apply -f - <<EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: cluster-k3d-homelab
+          namespace: argocd
+          labels:
+            argocd.argoproj.io/secret-type: cluster
+        type: Opaque
+        stringData:
+          name: k3d-apps
+          server: https://k3d-homelab-serverlb:6443
+          config: |
+            {"bearerToken":"${TOKEN}","tlsClientConfig":{"insecure":true}}
+        EOF
+
+  # ── Root app-of-apps ───────────────────────────────────────────────────────
+
+  bootstrap:root-apps:
+    desc: Apply root app-of-apps so ArgoCD manages gitops/mgmt and gitops/homelab
+    cmds:
+      - kubectl --context {{.MGMT_CLUSTER}} apply -f gitops/root-mgmt.yaml
+      - kubectl --context {{.MGMT_CLUSTER}} apply -f gitops/root-homelab.yaml
+
+  # ── Full bootstrap ─────────────────────────────────────────────────────────
+
+  bootstrap:
+    desc: Create clusters, bootstrap sealed-secrets + Tailscale + ArgoCD, hand off to GitOps
+    cmds:
+      - task: cluster:create
+      - task: bootstrap:sealed-secrets
+      - task: secrets:seal:tailscale
+      - task: bootstrap:tailscale
+      - task: bootstrap:argocd
+      - task: bootstrap:argocd:wait
+      - task: bootstrap:argocd:register-homelab
+      - task: bootstrap:root-apps
+      - task: bootstrap:argocd:password
+
+  bootstrap:fresh:
+    desc: Tear down existing clusters and run a full bootstrap from scratch
+    cmds:
+      - task: cluster:delete
+      - task: bootstrap
+
+  # ── Teardown ───────────────────────────────────────────────────────────────
+
+  teardown:
+    desc: Delete both clusters
+    cmds:
+      - task: cluster:delete

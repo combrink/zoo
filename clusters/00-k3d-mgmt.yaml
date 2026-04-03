@@ -1,0 +1,13 @@
+---
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: mgmt
+image: rancher/k3s:v1.32.3-k3s1
+servers: 1
+agents: 0
+network: k3d-zoo
+ports:
+  - port: 6443:6443
+    nodeFilters:
+      - loadbalancer
