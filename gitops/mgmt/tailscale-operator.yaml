@@ -15,7 +15,7 @@ spec:
       chart: tailscale-operator
       targetRevision: 1.94.2
       helm:
-        valuesFiles:
+        valueFiles:
           - $values/bootstrap/tailscale-operator/mgmt/values-mgmt.yaml
     - repoURL: https://github.com/combrink/zoo.git
       targetRevision: HEAD
