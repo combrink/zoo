@@ -75,15 +75,22 @@ Create an OAuth client at [tailscale.com/admin/settings/oauth](https://tailscale
 | Auth Keys | Write |
 | Services | Write |
 
-The client must be associated with the tag used in `operatorConfig.defaultTags` (default: `tag:kubernetes`). Add the tag to your tailnet ACL before bootstrapping:
+Add all three tags to your tailnet ACL **before** creating the OAuth client (tag permissions are baked in at client creation time):
 
 ```json
 "tagOwners": {
-  "tag:kubernetes": ["autogroup:admin"]
-}
+    "tag:k8s-operator": [],
+    "tag:kubernetes":   [],
+    "tag:k8s":          [],
+},
 ```
 
-> **Note:** The operator requires OAuth client credentials (`tskey-client-...`), not a personal API key (`tskey-api-...`).
+Also add all three tags to the OAuth client's **Tags** field in the console.
+
+> **Notes:**
+> - The operator requires OAuth client credentials (`tskey-client-...`), not a personal API key (`tskey-api-...`)
+> - `tagOwners` must use empty `[]` — user-owned tags (`["autogroup:admin"]`) block OAuth client key creation
+> - Create the ACL tags **first**, then create the OAuth client — tag grants are fixed at client creation time
 
 The client ID and secret are passed as environment variables:
 
