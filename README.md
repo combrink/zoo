@@ -62,8 +62,35 @@ Within each `gitops/{mgmt,homelab}/` directory ArgoCD applies resources in waves
 
 ### Prerequisites
 
-- `k3d`, `kubectl`, `helm`, `kubeseal`, `task` installed
-- Tailscale OAuth client credentials (create one at [tailscale.com/admin/settings/oauth](https://tailscale.com/admin/settings/oauth))
+- `k3d`, `kubectl`, `helm`, `kubeseal`, `kustomize`, `task` installed
+- Tailscale OAuth client credentials (see below)
+
+### Tailscale OAuth client setup
+
+Create an OAuth client at [tailscale.com/admin/settings/oauth](https://tailscale.com/admin/settings/oauth) with the following scopes:
+
+| Scope | Permission |
+|-------|-----------|
+| Devices Core | Write |
+| Auth Keys | Write |
+| Services | Write |
+
+The client must be associated with the tag used in `operatorConfig.defaultTags` (default: `tag:kubernetes`). Add the tag to your tailnet ACL before bootstrapping:
+
+```json
+"tagOwners": {
+  "tag:kubernetes": ["autogroup:admin"]
+}
+```
+
+> **Note:** The operator requires OAuth client credentials (`tskey-client-...`), not a personal API key (`tskey-api-...`).
+
+The client ID and secret are passed as environment variables:
+
+```sh
+export TAILSCALE_CLIENT_ID=<oauth-client-id>
+export TAILSCALE_CLIENT_SECRET=<tskey-client-...>
+```
 
 ### First-time setup
 
