@@ -13,11 +13,15 @@ tasks:
     desc: Create the management k3d cluster
     cmds:
       - k3d cluster create --config clusters/00-k3d-mgmt.yaml
+      - k3d kubeconfig merge mgmt --kubeconfig-merge-default
+      - kubectl config set-cluster k3d-mgmt --server=https://0.0.0.0:6443
 
   cluster:create:homelab:
     desc: Create the homelab k3d cluster
     cmds:
       - k3d cluster create --config clusters/01-k3d-homelab.yaml
+      - k3d kubeconfig merge homelab --kubeconfig-merge-default
+      - kubectl config set-cluster k3d-homelab --server=https://0.0.0.0:6444
 
   cluster:network:
     desc: Create shared Docker network for both clusters
@@ -51,11 +55,13 @@ tasks:
     desc: Install sealed-secrets controller on the management cluster
     cmds:
       - kustomize build --enable-helm bootstrap/sealed-secrets | kubectl --context {{.MGMT_CLUSTER}} apply --server-side -f -
+      - kubectl --context {{.MGMT_CLUSTER}} -n kube-system rollout status deploy/sealed-secrets
 
   bootstrap:sealed-secrets:homelab:
     desc: Install sealed-secrets controller on the homelab cluster
     cmds:
       - kustomize build --enable-helm bootstrap/sealed-secrets | kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side -f -
+      - kubectl --context {{.HOMELAB_CLUSTER}} -n kube-system rollout status deploy/sealed-secrets
 
   bootstrap:sealed-secrets:
     desc: Install sealed-secrets controller on both clusters
@@ -92,6 +98,11 @@ tasks:
 
   secrets:seal:tailscale:
     desc: Seal Tailscale OAuth credentials for both clusters
+    preconditions:
+      - sh: test -n "$TAILSCALE_CLIENT_ID"
+        msg: "TAILSCALE_CLIENT_ID is not set"
+      - sh: test -n "$TAILSCALE_CLIENT_SECRET"
+        msg: "TAILSCALE_CLIENT_SECRET is not set"
     cmds:
       - task: secrets:seal:tailscale:mgmt
       - task: secrets:seal:tailscale:homelab
@@ -103,6 +114,8 @@ tasks:
   bootstrap:tailscale:mgmt:
     desc: Deploy Tailscale SealedSecret + operator on the management cluster
     cmds:
+      - helm repo add tailscale https://pkgs.tailscale.com/helmcharts 2>/dev/null || true
+      - helm repo update tailscale
       - kubectl --context {{.MGMT_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.MGMT_CLUSTER}} apply -f -
       - kubectl --context {{.MGMT_CLUSTER}} apply --server-side --force-conflicts -k bootstrap/tailscale-operator/mgmt
       - |
@@ -119,6 +132,8 @@ tasks:
   bootstrap:tailscale:homelab:
     desc: Deploy Tailscale SealedSecret + operator on the homelab cluster
     cmds:
+      - helm repo add tailscale https://pkgs.tailscale.com/helmcharts 2>/dev/null || true
+      - helm repo update tailscale
       - kubectl --context {{.HOMELAB_CLUSTER}} create namespace tailscale --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
       - kubectl --context {{.HOMELAB_CLUSTER}} apply --server-side --force-conflicts -k bootstrap/tailscale-operator/homelab
       - |
@@ -163,9 +178,6 @@ tasks:
 
   bootstrap:argocd:register-homelab:
     desc: Register the homelab cluster with ArgoCD via a cluster secret
-    vars:
-      TOKEN:
-        sh: kubectl --context {{.HOMELAB_CLUSTER}} create token argocd-manager -n kube-system --duration=8760h 2>/dev/null || kubectl --context {{.HOMELAB_CLUSTER}} -n kube-system get secret argocd-manager-token -o jsonpath='{.data.token}' | base64 -d
     cmds:
       - kubectl --context {{.HOMELAB_CLUSTER}} create serviceaccount argocd-manager -n kube-system --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
       - kubectl --context {{.HOMELAB_CLUSTER}} create clusterrolebinding argocd-manager-cluster-admin --clusterrole=cluster-admin --serviceaccount=kube-system:argocd-manager --dry-run=client -o yaml | kubectl --context {{.HOMELAB_CLUSTER}} apply -f -
