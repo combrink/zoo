@@ -92,39 +92,64 @@ Also add all three tags to the OAuth client's **Tags** field in the console.
 > - `tagOwners` must use empty `[]` — user-owned tags (`["autogroup:admin"]`) block OAuth client key creation
 > - Create the ACL tags **first**, then create the OAuth client — tag grants are fixed at client creation time
 
-The client ID and secret are passed as environment variables:
+The client ID and secret are stored in a `.env` file at the repo root (excluded from git):
 
 ```sh
-export TAILSCALE_CLIENT_ID=<oauth-client-id>
-export TAILSCALE_CLIENT_SECRET=<tskey-client-...>
+TAILSCALE_CLIENT_ID=<oauth-client-id>
+TAILSCALE_CLIENT_SECRET=<tskey-client-...>
 ```
+
+The Taskfile loads `.env` automatically via `dotenv`, so no manual `export` is needed.
 
 ### First-time setup
 
 ```sh
-export TAILSCALE_CLIENT_ID=<your-client-id>
-export TAILSCALE_CLIENT_SECRET=<your-client-secret>
-
+# create .env with your credentials (see above), then:
 task bootstrap
 ```
 
+If clusters already exist from a previous run, use `task bootstrap:fresh` to tear them down and start clean.
+
 This runs the following steps in order:
 
-1. `task cluster:create` — create both k3d clusters
-2. `task bootstrap:sealed-secrets` — install Sealed Secrets controller on both clusters (`kubectl apply -k`)
-3. `task secrets:seal:tailscale` — seal the Tailscale OAuth credentials with each cluster's public key
-4. `task bootstrap:tailscale` — install the Tailscale operator on both clusters via Helm
-5. `task bootstrap:argocd` — install ArgoCD on `mgmt` via `kubectl apply -k bootstrap/argocd`
-6. `task bootstrap:argocd:wait` — wait for ArgoCD to be ready
-7. `task bootstrap:root-apps` — apply `gitops/root-mgmt.yaml` and `gitops/root-homelab.yaml`
-8. `task bootstrap:argocd:password` — print the initial admin password
+1. `cluster:create` — create both k3d clusters and fix kubeconfig ports
+2. `bootstrap:sealed-secrets` — install Sealed Secrets controller on both clusters and wait for it to be ready
+3. `secrets:seal:tailscale` — seal the Tailscale OAuth credentials with each cluster's public key
+4. `bootstrap:tailscale` — add the Tailscale helm repo and install the operator on both clusters
+5. `bootstrap:argocd` — install ArgoCD on `mgmt` (two-pass apply to handle CRD ordering)
+6. `bootstrap:argocd:wait` — wait for ArgoCD server, repo-server, and applicationset-controller to be ready
+7. `bootstrap:argocd:register-homelab` — create `argocd-manager` service account on `homelab` and register the cluster with ArgoCD
+8. `bootstrap:root-apps` — apply `gitops/root-mgmt.yaml` and `gitops/root-homelab.yaml`
+9. `bootstrap:argocd:password` — print the initial admin password
 
-After step 7, ArgoCD self-manages everything under `gitops/` from this repo.
+After step 8, ArgoCD self-manages everything under `gitops/` from this repo.
+
+### Re-sealing credentials (e.g. after rotating the OAuth client)
+
+Update `.env` with the new credentials, then:
+
+```sh
+task secrets:seal:tailscale
+git add bootstrap/tailscale-operator/mgmt/sealedsecret-mgmt.yaml \
+        bootstrap/tailscale-operator/homelab/sealedsecret-homelab.yaml
+git commit -m "Reseal Tailscale credentials"
+
+kubectl --context k3d-mgmt apply --server-side --force-conflicts -k bootstrap/tailscale-operator/mgmt
+kubectl --context k3d-mgmt delete secret operator-oauth -n tailscale
+kubectl --context k3d-mgmt rollout restart deploy/operator -n tailscale
+
+kubectl --context k3d-homelab apply --server-side --force-conflicts -k bootstrap/tailscale-operator/homelab
+kubectl --context k3d-homelab delete secret operator-oauth -n tailscale
+kubectl --context k3d-homelab rollout restart deploy/operator -n tailscale
+```
+
+> The `delete secret` step is required because sealed-secrets suppresses updates when the decrypted value matches the existing secret. Deleting forces a clean recreation.
 
 ### Teardown
 
 ```sh
-task teardown
+task teardown        # delete both clusters
+task bootstrap:fresh # teardown + full bootstrap in one step
 ```
 
 ## Tailscale

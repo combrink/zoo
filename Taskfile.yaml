@@ -1,6 +1,8 @@
 ---
 version: "3"
 
+dotenv: [".env"]
+
 vars:
   MGMT_CLUSTER: k3d-mgmt
   HOMELAB_CLUSTER: k3d-homelab
